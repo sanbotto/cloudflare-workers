@@ -8,28 +8,56 @@
  * object, as you can see by the use of substring().
  */
 
-async function handleRequest(request) {
-  const url = new URL(request.url)
-  // slice(1) removes the first char from the path, which is '/'
-  const str = url.pathname.slice(1)
-  // This next part removes the first directory from the path
-  const objectName = str.substring(str.indexOf('/') + 1)
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url)
 
-  console.log(`${request.method} object ${objectName}: ${request.url}`)
-  if (request.method === 'GET') {
-    // Get the requested object from the R2 bucket
-    const object = await r2_bucket.get(objectName)
-    // r2_bucket is defined as an environment variable
+    // Remove the first char from the path, which is '/'
+    const objectName = url.pathname.slice(1)
 
-    const headers = new Headers()
-    object.writeHttpMetadata(headers)
-    headers.set('etag', object.httpEtag)
-    return new Response(object.body, {
-      headers
-    })
+    // Make sure that env.R2_BUCKET is set
+    if (!env.R2_BUCKET) {
+      return new Response(JSON.stringify({ error: 'The binding with the backend storage service has not been set' }), {
+        status: 500,
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      })
+    }
+
+    if (request.method === 'GET') {
+      try {
+        // Get the requested object from the R2 bucket
+        const object = await env.R2_BUCKET.get(objectName)
+
+        // Set the ETag header to the value of the object's httpEtag
+        const headers = new Headers()
+        object.writeHttpMetadata(headers)
+        headers.set('etag', object.httpEtag)
+
+        // Return the object's body with the modified headers
+        return new Response(object.body, {
+          headers
+        })
+      } catch (err) {
+        // An error here is most likely due to the object not being found
+        return new Response(JSON.stringify({ error: `Object ${objectName || null} not found` }), {
+          status: 404,
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        })
+      }
+
+    } else {
+
+      // Only GET requests are allowed
+      return new Response(JSON.stringify({ error: `Method not allowed (${request.method}), please use GET` }), {
+        status: 405,
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      })
+    }
   }
 }
-
-addEventListener('fetch', async event => {
-  event.respondWith(handleRequest(event.request))
-})
